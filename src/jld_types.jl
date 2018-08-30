@@ -32,8 +32,8 @@ end
 
 # Get information about the HDF5 types corresponding to Julia types
 function JldTypeInfo(parent::JldFile, types::TypesType, commit::Bool)
-    dtypes = Vector{JldDatatype}(length(types))
-    offsets = Vector{Int}(length(types))
+    dtypes = Vector{JldDatatype}(undef, length(types))
+    offsets = Vector{Int}(undef, length(types))
     offset = 0
     for i = 1:length(types)
         dtype = dtypes[i] = h5fieldtype(parent, types[i], commit)
@@ -287,7 +287,7 @@ h5fieldtype(parent::JldFile, ::Type{Array{T,N}}, ::Bool) where {T,N} = JLD_REF_T
 
 if INLINE_TUPLE
     h5fieldtype(parent::JldFile, T::TupleType, commit::Bool) =
-        isconcrete(T) ? h5type(parent, T, commit) : JLD_REF_TYPE
+        isconcretetype(T) ? h5type(parent, T, commit) : JLD_REF_TYPE
 else
     h5fieldtype(parent::JldFile, T::TupleType, ::Bool) = JLD_REF_TYPE
 end
@@ -296,7 +296,7 @@ function h5type(parent::JldFile, T::TupleType, commit::Bool)
     haskey(parent.jlh5type, T) && return parent.jlh5type[T]
     # Tuples should always be concretely typed, unless we're
     # reconstructing a tuple, in which case commit will be false
-    !commit || isconcrete(T) || error("unexpected non-concrete type $T")
+    !commit || isconcretetype(T) || error("unexpected non-concrete type $T")
 
     typeinfo = JldTypeInfo(parent, T, commit)
     if isopaque(T)
@@ -328,10 +328,10 @@ end
 # this is a reference. If the type is immutable, this is a type itself.
 if INLINE_POINTER_IMMUTABLE
     h5fieldtype(parent::JldFile, @nospecialize(T), commit::Bool) =
-        isconcrete(T) && (!T.mutable || T.size == 0) ? h5type(parent, T, commit) : JLD_REF_TYPE
+        isconcretetype(T) && (!T.mutable || T.size == 0) ? h5type(parent, T, commit) : JLD_REF_TYPE
 else
     h5fieldtype(parent::JldFile, @nospecialize(T), commit::Bool) =
-        isconcrete(T) && (!T.mutable || T.size == 0) && datatype_pointerfree(T) ? h5type(parent, T, commit) : JLD_REF_TYPE
+        isconcretetype(T) && (!T.mutable || T.size == 0) && datatype_pointerfree(T) ? h5type(parent, T, commit) : JLD_REF_TYPE
 end
 
 function h5type(parent::JldFile, @nospecialize(T), commit::Bool)
@@ -339,7 +339,7 @@ function h5type(parent::JldFile, @nospecialize(T), commit::Bool)
     T = T::DataType
 
     haskey(parent.jlh5type, T) && return parent.jlh5type[T]
-    isconcrete(T) || error("unexpected non-concrete type ", T)
+    isconcretetype(T) || error("unexpected non-concrete type ", T)
 
     if isopaque(T)
         # Empty type or non-basic bitstype

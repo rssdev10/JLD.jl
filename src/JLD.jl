@@ -13,6 +13,8 @@ import LegacyStrings: UTF16String
 
 import Base.Printf: @sprintf
 
+import Base.Meta: parse
+
 @noinline gcuse(x) = x # because of use of `pointer`, need to mark gc-use end explicitly
 
 const magic_base = "Julia data file (HDF5), version "
@@ -46,7 +48,7 @@ struct JldWriteSession
     persist::Vector{Any} # To hold objects that should not be garbage-collected
     h5ref::IdDict  # To hold mapping from Object/Array -> HDF5ReferenceObject
 
-    JldWriteSession() = new(Any[], ObjectIdDict())
+    JldWriteSession() = new(Any[], IdDict())
 end
 
 # The Julia Data file type
@@ -77,7 +79,7 @@ mutable struct JldFile <: HDF5.DataFile
                 Dict{HDF5Datatype,Type}(), Dict{Type,HDF5Datatype}(),
                 Dict{HDF5ReferenceObj,WeakRef}(), String[])
         if toclose
-            finalizer(f, close)
+            finalizer(close, f)
         end
         f
     end
@@ -192,14 +194,14 @@ function jldopen(filename::AbstractString, rd::Bool, wr::Bool, cr::Bool, tr::Boo
             if sz < 512
                 error("File size indicates $filename cannot be a Julia data file")
             end
-            magic = Vector{UInt8}(512)
+            magic = Vector{UInt8}(undef, 512)
             rawfid = open(filename, "r")
             try
                 magic = read!(rawfid, magic)
             finally
                 close(rawfid)
             end
-            if startswith(magic, Vector{UInt8}(magic_base))
+            if startswith(magic, Vector{UInt8}(undef, magic_base))
                 version = convert(VersionNumber, unsafe_string(pointer(magic) + length(magic_base)))
                 gcuse(magic)
                 if version < v"0.1.0"
@@ -381,7 +383,7 @@ function read(obj::JldDataset)
             end
             if exists(obj, "dims")
                 dims = a_read(obj.plain, "dims")
-                return Array{T}(dims...)
+                return Array{T}(undef, dims...)
             else
                 return T[]
             end
@@ -395,7 +397,7 @@ end
 read_scalar(obj::JldDataset, dtype::HDF5Datatype, ::Type{T}) where {T<:BitsKindOrString} =
     read(obj.plain, T)
 function read_scalar(obj::JldDataset, dtype::HDF5Datatype, T::Type)
-    buf = Vector{UInt8}(sizeof(dtype))
+    buf = Vector{UInt8}(undef, sizeof(dtype))
     HDF5.readarray(obj.plain, dtype.id, buf)
     sc = readas(jlconvert(T, file(obj), pointer(buf)))
     gcuse(buf)
@@ -421,7 +423,7 @@ function read_vals(obj::JldDataset, dtype::HDF5Datatype, T::Union{Type{S}, Type{
     if obj.file.mmaparrays && HDF5.iscontiguous(obj.plain) && dsel_id == HDF5.H5S_ALL
         readmmap(obj.plain, Array{T})
     else
-        out = Array{T}(dims)
+        out = Array{T}(undef, dims)
         HDF5.h5d_read(obj.plain.id, dtype.id, dspace_id, dsel_id, HDF5.H5P_DEFAULT, out)
         out
     end
@@ -430,14 +432,14 @@ end
 # Arrays of immutables/bitstypes
 function read_vals(obj::JldDataset, dtype::HDF5Datatype, T::Type, dspace_id::HDF5.Hid,
                    dsel_id::HDF5.Hid, dims::Tuple{Vararg{Int}})
-    out = Array{T}(dims)
+    out = Array{T}(undef, dims)
     # Empty objects don't need to be read at all
     T.size == 0 && !T.mutable && return out
 
     # Read from file
     n = prod(dims)
     h5sz = sizeof(dtype)
-    buf = Vector{UInt8}(h5sz*n)
+    buf = Vector{UInt8}(undef, h5sz*n)
     HDF5.h5d_read(obj.plain.id, dtype.id, dspace_id, dsel_id, HDF5.H5P_DEFAULT, buf)
 
     f = file(obj)
@@ -467,10 +469,10 @@ end
 # Arrays of references
 function read_refs(obj::JldDataset, ::Type{T}, dspace_id::HDF5.Hid, dsel_id::HDF5.Hid,
                    dims::Tuple{Vararg{Int}}) where T
-    refs = Array{HDF5ReferenceObj}(dims)
+    refs = Array{HDF5ReferenceObj}(undef, dims)
     HDF5.h5d_read(obj.plain.id, HDF5.H5T_STD_REF_OBJ, dspace_id, dsel_id, HDF5.H5P_DEFAULT, refs)
 
-    out = Array{T}(dims)
+    out = Array{T}(undef, dims)
     f = file(obj)
     for i = 1:length(refs)
         if refs[i] != HDF5.HDF5ReferenceObj_NULL
@@ -597,7 +599,7 @@ function h5convert_array(f::JldFile, data::Array,
                          dtype::JldDatatype, wsession::JldWriteSession)
     if dtype == JLD_REF_TYPE
         # For type stability, return as Vector{UInt8}
-        refs = VERSION < v"0.7.0-DEV.2083" ? reinterpret(UInt8,Vector{HDF5ReferenceObj}(length(data))) : Vector{UInt8}(length(data)*sizeof(HDF5ReferenceObj))
+        refs = VERSION < v"0.7.0-DEV.2083" ? reinterpret(UInt8,Vector{HDF5ReferenceObj}(undef, length(data))) : Vector{UInt8}(undef, length(data)*sizeof(HDF5ReferenceObj))
         arefs = reinterpret(HDF5ReferenceObj, refs)
         for i = 1:length(data)
             if isassigned(data, i)
@@ -625,7 +627,7 @@ end
                          dtype::JldDatatype, wsession::JldWriteSession)
     sz = HDF5.h5t_get_size(dtype)
     n = length(data)
-    buf = Vector{UInt8}(sz*n)
+    buf = Vector{UInt8}(undef, sz*n)
     offset = pointer(buf)
     for i = 1:n
         h5convert!(offset, f, data[i], wsession)
@@ -698,7 +700,7 @@ function write_compound(parent::Union{JldFile, JldGroup}, name::String,
     dtype = h5type(f, T, true)
     gen_h5convert(f, T)
 
-    buf = Vector{UInt8}(HDF5.h5t_get_size(dtype))
+    buf = Vector{UInt8}(undef, HDF5.h5t_get_size(dtype))
     h5convert!(pointer(buf), file(parent), s, wsession)
     gcuse(buf)
 
@@ -815,8 +817,8 @@ end
 
 function convert(::Type{AssociativeWrapper{K,V,T}}, d::AbstractDict) where {K,V,T}
     n = length(d)
-    ks = Vector{K}(n)
-    vs = Vector{V}(n)
+    ks = Vector{K}(undef, n)
+    vs = Vector{V}(undef, n)
     i = 0
     for (k,v) in d
         ks[i+=1] = k
@@ -833,7 +835,7 @@ end
 
 # Special case for SimpleVector
 readas(x::SimpleVectorWrapper) = Core.svec(x.elements...)
-writeas(x::Core.SimpleVector) = SimpleVectorWrapper([x...])
+writeas(x::Core.SimpleVector) = SimpleVectorWrapper(x)
 
 # function to convert string(mod::Module) back to mod::Module
 function modname2mod(modname::AbstractString)
@@ -1061,7 +1063,7 @@ function full_typename(io::IO, ::JldFile, x)
 end
 function full_typename(io::IO, ::JldFile, x::Symbol)
     s = string(x)
-    if contains(s, " ")
+    if occursin(" ", s)
         # escape spaces
         print_escaped(io, string("symbol(\"", string(x), "\")"), " ")
     else
@@ -1102,7 +1104,7 @@ function full_typename(io::IO, file::JldFile, jltype::DataType)
     end
 end
 function full_typename(file::JldFile, x)
-    io = IOBuffer(Vector{UInt8}(64), true, true)
+    io = IOBuffer(Vector{UInt8}(undef, 64), read=true, write=true)
     truncate(io, 0)
     full_typename(io, file, x)
     String(take!(io))
@@ -1139,7 +1141,7 @@ end
 macro save(filename, vars...)
     if isempty(vars)
         # Save all variables in the current module
-        writeexprs = Vector{Expr}(0)
+        writeexprs = Vector{Expr}(undef, 0)
         m = current_module()
         for vname in names(m)
             s = string(vname)
@@ -1151,7 +1153,7 @@ macro save(filename, vars...)
             end
         end
     else
-        writeexprs = Vector{Expr}(length(vars))
+        writeexprs = Vector{Expr}(undef, length(vars))
         for i = 1:length(vars)
             writeexprs[i] = :(write(f, $(string(vars[i])), $(esc(vars[i])), wsession))
         end

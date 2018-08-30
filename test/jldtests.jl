@@ -1,6 +1,8 @@
 using HDF5, JLD
 using Compat, LegacyStrings
-using Base.Test
+using Test
+
+import Base.Meta: parse
 
 # Define variables of different types
 x = 3.7
@@ -20,9 +22,9 @@ B = [-1.5 sqrt(2) NaN 6;
      0.0  Inf eps() -Inf]
 AB = Any[A, B]
 t = (3, "cat")
-c = Complex64(3,7)
+c = ComplexF32(3,7)
 cint = 1+im  # issue 108
-C = reinterpret(Complex128, B, (4,))
+C = reinterpret(ComplexF64, B)
 emptyA = zeros(0,2)
 emptyB = zeros(2,0)
 try
@@ -63,11 +65,11 @@ unicode_char = '\U10ffff'
 β = Any[[1, 2], [3, 4]]  # issue #93
 vv = Vector{Int}[[1,2,3]]  # issue #123
 typevar = Array{Int}[[1]]
-eval(parse("typevar_lb = (Vector{U} where U<:Integer)[[1]]"))
-eval(parse("typevar_ub = (Vector{U} where Int<:U<:Any)[[1]]"))
-eval(parse("typevar_lb_ub = (Vector{U} where Int<:U<:Real)[[1]]"))
-undef = Vector{Any}(1)
-undefs = Matrix{Any}(2, 2)
+eval(parse("typevar_lb = (Vector{U} where U<:Integer)[[1]]")
+eval(parse("typevar_ub = (Vector{U} where Int<:U<:Any)[[1]]")
+eval(parse("typevar_lb_ub = (Vector{U} where Int<:U<:Real)[[1]]")
+undefv = Vector{Any}(undef, 1)
+undefs = Matrix{Any}(undef, 2, 2)
 ms_undef = MyStruct(0)
 # Unexported type:
 cpus = Base.Sys.cpu_info()
@@ -75,7 +77,7 @@ cpus = Base.Sys.cpu_info()
 rng = 1:5
 # Type with a pointer field (#84)
 struct ObjWithPointer
-    a::Ptr{Void}
+    a::Ptr{Nothing}
 end
 objwithpointer = ObjWithPointer(0)
 # Custom PrimitiveType (#99)
@@ -185,9 +187,9 @@ end
 padding_test = PaddingTest[PaddingTest(i, i) for i = 1:8]
 # Empty arrays of various types and sizes
 empty_arr_1 = Int[]
-empty_arr_2 = Matrix{Int}(56, 0)
+empty_arr_2 = Matrix{Int}(undef, 56, 0)
 empty_arr_3 = Any[]
-empty_arr_4 = Matrix{Any}(0, 97)
+empty_arr_4 = Matrix{Any}(undef, 0, 97)
 # Moderately big dataset (which will be mmapped)
 bigdata = [1:10000;]
 # BigFloats and BigInts
@@ -195,13 +197,20 @@ bigints = big(3).^(1:100)
 bigfloats = big(3.2).^(1:100)
 # None
 none = Union{}
-nonearr = Vector{Union{}}(5)
+nonearr = Vector{Union{}}(undef, 5)
 # nothing/Void
 scalar_nothing = nothing
-vector_nothing = Union{Int,Void}[1,nothing]
+vector_nothing = Union{Int,Nothing}[1,nothing]
 
 # some data big enough to ensure that compression is used:
-Abig = kron(eye(10), rand(20,20))
+function eye1(n::Int64)
+    m = zeros(n,n)
+    for i = 1 : n
+       m[i,i] = 1.0
+    end
+    return m
+end
+Abig = kron(eye1(10), rand(20,20))
 Bbig = Any[i for i=1:3000]
 Sbig = "A test string "^1000
 
@@ -219,14 +228,14 @@ tuple_of_tuples = (1, 2, (3, 4, [5, 6]), [7, 8])
 
 # SimpleVector
 simplevec = Core.svec(1, 2, Int64, "foo")
-iseq(x::SimpleVector, y::SimpleVector) = collect(x) == collect(y)
+iseq(x::Core.SimpleVector, y::Core.SimpleVector) = collect(x) == collect(y)
 
 # Issue #243
 # Type that overloads != so that it is not boolean
 mutable struct NALikeType; end
 Base.:(!=)(::NALikeType, ::NALikeType) = NALikeType()
-Base.:(!=)(::NALikeType, ::Void) = NALikeType()
-Base.:(!=)(::Void, ::NALikeType) = NALikeType()
+Base.:(!=)(::NALikeType, ::Nothing) = NALikeType()
+Base.:(!=)(::Nothing, ::NALikeType) = NALikeType()
 natyperef = Any[NALikeType(), NALikeType()]
 
 # Issue #110
@@ -389,7 +398,7 @@ for compatible in (false, true), compress in (false, true)
         write(fid, "A", Arnd)
         Aset = fid["A"]
         Aset[:,2] = 15
-        Arnd[:,2] = 15
+        Arnd[:,2] .= 15
         @test read(fid, "A") == Arnd
     end
 end
@@ -436,7 +445,7 @@ for compatible in (false, true), compress in (false, true)
     @write fid typevar_lb
     @write fid typevar_ub
     @write fid typevar_lb_ub
-    @write fid undef
+    @write fid undefv
     @write fid undefs
     @write fid ms_undef
     @test_throws JLD.PointerException @write fid objwithpointer
@@ -556,9 +565,9 @@ for compatible in (false, true), compress in (false, true)
         @check fidr typevar_lb_ub
 
         # Special cases for reading undefs
-        undef = read(fidr, "undef")
-        if !isa(undef, Array{Any, 1}) || length(undef) != 1 || isassigned(undef, 1)
-            error("For undef, read value does not agree with written value")
+        undefv = read(fidr, "undefv")
+        if !isa(undefv, Array{Any, 1}) || length(undefv) != 1 || isassigned(undefv, 1)
+            error("For undefv, read value does not agree with written value")
         end
         undefs = read(fidr, "undefs")
         if !isa(undefs, Array{Any, 2}) || length(undefs) != 4 || any(map(i->isassigned(undefs, i), 1:4))
