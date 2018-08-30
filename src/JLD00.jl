@@ -4,11 +4,14 @@
 
 module JLD00
 using HDF5, LegacyStrings
+
 # Add methods to...
 import HDF5: close, dump, exists, file, getindex, setindex!, g_create, g_open, o_delete, name, names, read, size, write,
              HDF5ReferenceObj, HDF5BitsKind, ismmappable, readmmap
-import Base: length, endof, show, done, next, start, delete!
+import Base: length, show, delete!, RangeIndex
 import ..JLD
+
+import Base.Printf: @sprintf
 
 # See julia issue #8907
 replacements = Any[]
@@ -366,7 +369,7 @@ function read(obj::JldDataset, ::Type{Array{Array{T,N},M}}) where {T<:HDF5BitsKi
 end
 
 # Nothing
-read(obj::JldDataset, ::Type{Void}) = nothing
+read(obj::JldDataset, ::Type{Nothing}) = nothing
 read(obj::JldDataset, ::Type{Bool}) = read(obj, UInt8) != 0
 
 # Types
@@ -416,7 +419,7 @@ function read_tuple(obj::JldDataset, indices::AbstractVector)
 end
 
 # Dict
-function read(obj::JldDataset, ::Type{T}) where T<:Associative
+function read(obj::JldDataset, ::Type{T}) where T<:AbstractDict
     kv = getrefs(obj, Any)
     ret = T()
     for (cn, c) in zip(kv[1], kv[2])
@@ -459,7 +462,7 @@ function read(obj::JldDataset, T::DataType)
             error("Wrong number of fields")
         end
         if !T.mutable
-            x = ccall(:jl_new_structv, Any, (Any,Ptr{Void},UInt32), T, v, length(fieldnames(T)))
+            x = ccall(:jl_new_structv, Any, (Any,Ptr{Nothing},UInt32), T, v, length(fieldnames(T)))
         else
             x = ccall(:jl_new_struct_uninit, Any, (Any,), T)
             for i = 1:length(v)
@@ -567,7 +570,7 @@ end
 
 
 # Write nothing
-function write(parent::Union{JldFile, JldGroup}, name::String, n::Void, astype::String)
+function write(parent::Union{JldFile, JldGroup}, name::String, n::Nothing, astype::String)
     local dspace, dset
     try
         dspace = dataspace(nothing)
@@ -579,7 +582,7 @@ function write(parent::Union{JldFile, JldGroup}, name::String, n::Void, astype::
         close(dset)
     end
 end
-write(parent::Union{JldFile, JldGroup}, name::String, n::Void) = write(parent, name, n, "Nothing")
+write(parent::Union{JldFile, JldGroup}, name::String, n::Nothing) = write(parent, name, n, "Nothing")
 
 # Types
 # the first is needed to avoid an ambiguity warning
@@ -681,7 +684,7 @@ write(parent::Union{JldFile, JldGroup}, path::String, data::Array{T}) where {T} 
 write(parent::Union{JldFile, JldGroup}, name::String, t::Tuple) = write(parent, name, Any[t...], "Tuple")
 
 # Associative (Dict)
-function write(parent::Union{JldFile, JldGroup}, name::String, d::Associative)
+function write(parent::Union{JldFile, JldGroup}, name::String, d::AbstractDict)
     tn = full_typename(typeof(d))
     if tn == "DataFrame"
         return write_composite(parent, name, d)
@@ -1081,7 +1084,7 @@ macro load(filename, vars...)
 end
 
 # Save all the key-value pairs in the dict as top-level variables of the JLD
-function save(filename::AbstractString, dict::Associative)
+function save(filename::AbstractString, dict::AbstractDict)
     jldopen(filename, "w") do file
         for (k,v) in dict
             write(file, bytestring(k), v)

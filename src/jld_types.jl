@@ -2,6 +2,8 @@
 # stores as references, are stored inline in compound types when
 # possible. Currently this is problematic because Julia fields of these
 # types may be undefined.
+using Base.Printf
+
 const INLINE_TUPLE = false
 const INLINE_POINTER_IMMUTABLE = false
 
@@ -12,7 +14,7 @@ const JLCONVERT_INFO = Dict{Any, Any}()
 const H5CONVERT_INFO = Dict{Any, Any}()
 
 const EMPTY_TUPLE_TYPE = Tuple{}
-const TypesType = SimpleVector
+const TypesType = Core.SimpleVector
 TupleType{T<:Tuple} = Type{T}
 tupletypes(T::TupleType) = T.parameters
 typetuple(types) = Tuple{types...}
@@ -66,7 +68,7 @@ end
 
 # If parent is nothing, we are creating the datatype in memory for
 # validation, so don't commit it
-commit_datatype(parent::Void, dtype::HDF5Datatype, @nospecialize(T)) =
+commit_datatype(parent::Nothing, dtype::HDF5Datatype, @nospecialize(T)) =
     JldDatatype(dtype, -1)
 
 # The HDF5 library loses track of relationships among committed types
@@ -131,11 +133,11 @@ jlconvert!(out::Ptr, T::BitsKindTypes, ::JldFile, ptr::Ptr) = _jlconvert_bits!(o
 
 ## Void/Nothing
 
-const VoidType = Type{Void}
+const VoidType = Type{Nothing}
 
 jlconvert(T::VoidType, ::JldFile, ptr::Ptr) = nothing
 jlconvert!(out::Ptr, T::VoidType, ::JldFile, ptr::Ptr) = (unsafe_store!(convert(Ptr{T}, out), nothing); nothing)
-h5convert!(out::Ptr, ::JldFile, x::Void, ::JldWriteSession) = nothing
+h5convert!(out::Ptr, ::JldFile, x::Nothing, ::JldWriteSession) = nothing
 
 ## Strings
 
@@ -417,18 +419,18 @@ function _gen_jlconvert_immutable(typeinfo::JldTypeInfo, @nospecialize(T))
                         warn("""A pointerfree tuple field was undefined.
                                 This is not supported in Julia 0.4 and the corresponding tuple will be uninitialized.""")
                     else
-                        ccall(:jl_set_nth_field, Void, (Any, Csize_t, Any), out, $(i-1), convert($(T.types[i]), read_ref(file, ref)))
+                        ccall(:jl_set_nth_field, Nothing, (Any, Csize_t, Any), out, $(i-1), convert($(T.types[i]), read_ref(file, ref)))
                     end
                 end)
             elseif HDF5.h5t_get_class(typeinfo.dtypes[i]) == HDF5.H5T_REFERENCE
                 push!(args, quote
                     ref = unsafe_load(convert(Ptr{HDF5ReferenceObj}, ptr)+$h5offset)
                     if ref != HDF5.HDF5ReferenceObj_NULL
-                        ccall(:jl_set_nth_field, Void, (Any, Csize_t, Any), out, $(i-1), convert($(T.types[i]), read_ref(file, ref)))
+                        ccall(:jl_set_nth_field, Nothing, (Any, Csize_t, Any), out, $(i-1), convert($(T.types[i]), read_ref(file, ref)))
                     end
                 end)
             else
-                push!(args, :(ccall(:jl_set_nth_field, Void, (Any, Csize_t, Any), out, $(i-1), jlconvert($(T.types[i]), file, ptr+$h5offset))))
+                push!(args, :(ccall(:jl_set_nth_field, Nothing, (Any, Csize_t, Any), out, $(i-1), jlconvert($(T.types[i]), file, ptr+$h5offset))))
             end
         end
         push!(args, :(return out))
@@ -497,7 +499,7 @@ end
 
 
 function gen_jlconvert(typeinfo::JldTypeInfo, @nospecialize(T))
-    T === Void && return
+    T === Nothing && return
     # TODO: this is probably invalid, so try to do this differently
     JLCONVERT_INFO[T] = typeinfo
     nothing
@@ -576,7 +578,7 @@ unknown_type_err(T) =
     error("""$T is not of a type supported by JLD
              Please report this error at https://github.com/JuliaIO/HDF5.jl""")
 
-const BUILTIN_H5_types = Union{Void, Type, String, HDF5.HDF5BitsKind, UTF16String, Symbol, BigInt, BigFloat}
+const BUILTIN_H5_types = Union{Nothing, Type, String, HDF5.HDF5BitsKind, UTF16String, Symbol, BigInt, BigFloat}
 function gen_h5convert(parent::JldFile, @nospecialize(T))
     T <: BUILTIN_H5_types && return
     # TODO: this is probably invalid, so try to do this differently

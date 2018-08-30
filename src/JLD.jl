@@ -1,13 +1,17 @@
 __precompile__()
 
 module JLD
-using HDF5, FileIO, Compat
+using HDF5, FileIO
+
+using Base.StackTraces
 
 import HDF5: close, dump, exists, file, getindex, setindex!, g_create, g_open, o_delete, name, names, read, write,
              HDF5ReferenceObj, HDF5BitsKind, ismmappable, readmmap
-import Base: convert, length, endof, show, done, next, ndims, start, delete!, eltype,
+import Base: convert, length, show, ndims, delete!, eltype,
              size, sizeof, unsafe_convert, datatype_pointerfree
 import LegacyStrings: UTF16String
+
+import Base.Printf: @sprintf
 
 @noinline gcuse(x) = x # because of use of `pointer`, need to mark gc-use end explicitly
 
@@ -40,7 +44,7 @@ sizeof(T::JldDatatype) = sizeof(T.dtype)
 
 struct JldWriteSession
     persist::Vector{Any} # To hold objects that should not be garbage-collected
-    h5ref::ObjectIdDict  # To hold mapping from Object/Array -> HDF5ReferenceObject
+    h5ref::IdDict  # To hold mapping from Object/Array -> HDF5ReferenceObject
 
     JldWriteSession() = new(Any[], ObjectIdDict())
 end
@@ -782,20 +786,20 @@ writeas(x) = x
 # Wrapper for associative keys
 # We write this instead of the associative to avoid dependence on the
 # Julia hash function
-struct AssociativeWrapper{K,V,T<:Associative}
+struct AssociativeWrapper{K,V,T<:AbstractDict}
     keys::Vector{K}
     values::Vector{V}
 end
 
 readas(x::AssociativeWrapper{K,V,T}) where {K,V,T} = convert(T, x)
-function writeas(x::T) where T<:Associative
+function writeas(x::T) where T<:AbstractDict
     K, V = destructure(eltype(x))
     convert(AssociativeWrapper{K,V,T}, x)
 end
 destructure(::Type{Pair{K,V}}) where {K,V} = K, V  # not inferrable, julia#10880
 
 # Special case for associative, to rehash keys
-function convert(::Type{T}, x::AssociativeWrapper{K,V,T}) where {K,V,T<:Associative}
+function convert(::Type{T}, x::AssociativeWrapper{K,V,T}) where {K,V,T<:AbstractDict}
     ret = T()
     keys = x.keys
     values = x.values
@@ -809,7 +813,7 @@ function convert(::Type{T}, x::AssociativeWrapper{K,V,T}) where {K,V,T<:Associat
     ret
 end
 
-function convert(::Type{AssociativeWrapper{K,V,T}}, d::Associative) where {K,V,T}
+function convert(::Type{AssociativeWrapper{K,V,T}}, d::AbstractDict) where {K,V,T}
     n = length(d)
     ks = Vector{K}(n)
     vs = Vector{V}(n)
@@ -824,12 +828,12 @@ end
 # Special case for SimpleVector
 # Wrapper for SimpleVector
 struct SimpleVectorWrapper
-    elements::Vector
+    elements::Core.SimpleVector
 end
 
 # Special case for SimpleVector
 readas(x::SimpleVectorWrapper) = Core.svec(x.elements...)
-writeas(x::SimpleVector) = SimpleVectorWrapper([x...])
+writeas(x::Core.SimpleVector) = SimpleVectorWrapper([x...])
 
 # function to convert string(mod::Module) back to mod::Module
 function modname2mod(modname::AbstractString)
@@ -912,7 +916,7 @@ const typemap_Core = Dict(
     :Uint16 => :Uint16,
     :Uint32 => :UInt32,
     :Uint64 => :UInt64,
-    :Nothing => :Void
+    :Nothing => :Nothing
 )
 
 const _typedict = Dict{String,Type}()
@@ -996,6 +1000,7 @@ function julia_type(e::Union{Symbol, Expr})
             typ = eval(Main, e)
             typ == Type && return Type
             isa(typ, Type) && return typ
+        finally
         end
     end
     return UnsupportedType
@@ -1203,7 +1208,7 @@ macro load(filename, vars...)
 end
 
 # Save all the key-value pairs in the dict as top-level variables of the JLD
-function FileIO.save(f::File{format"JLD"}, dict::Associative; compatible::Bool=false, compress::Bool=false)
+function FileIO.save(f::File{format"JLD"}, dict::AbstractDict; compatible::Bool=false, compress::Bool=false)
     jldopen(FileIO.filename(f), "w"; compatible=compatible, compress=compress) do file
         wsession = JldWriteSession()
         for (k,v) in dict

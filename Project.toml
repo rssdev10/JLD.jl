@@ -1,0 +1,15 @@
+name = "JLD"
+uuid = "4138dd39-2aa7-5051-a626-17a0bb65d9c8"
+version = "0.8.4"
+
+[deps]
+HDF5
+Compat
+FileIO
+LegacyStrings
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
