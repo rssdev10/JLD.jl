@@ -262,16 +262,16 @@ macro check(fid, sym)
             try
                 tmp = read($fid, $(string(sym)))
             catch e
-                warn("Error reading ", $(string(sym)))
+                :(@warn("Error reading ", $(string(sym))))
                 rethrow(e)
             end
             if !iseq(tmp, $sym)
                 written = $sym
-                error("For ", $(string(sym)), ", read value $tmp does not agree with written value $written")
+                :(@error("For ", $(string(sym)), ", read value $tmp does not agree with written value $written"))
             end
             written_type = typeof($sym)
             if typeof(tmp) != written_type
-                error("For ", $(string(sym)), ", read type $(typeof(tmp)) does not agree with written type $(written_type)")
+                :(@error("For ", $(string(sym)), ", read type $(typeof(tmp)) does not agree with written type $(written_type)"))
             end
         end
     end

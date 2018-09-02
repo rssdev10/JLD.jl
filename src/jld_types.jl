@@ -4,6 +4,10 @@
 # types may be undefined.
 using Base.Printf
 
+using Compat
+
+import Base: startswith
+
 const INLINE_TUPLE = false
 const INLINE_POINTER_IMMUTABLE = false
 
@@ -185,7 +189,7 @@ end
 
 function jlconvert(::Type{UTF16String}, ::JldFile, ptr::Ptr)
     hvl = unsafe_load(convert(Ptr{HDF5.Hvl_t}, ptr))
-    UTF16String(unsafe_wrap(Array, convert(Ptr{UInt16}, hvl.p), hvl.len, true))
+    UTF16String(unsafe_wrap(Array, convert(Ptr{UInt16}, hvl.p), hvl.len, own = true))
 end
 
 ## Symbols
@@ -416,7 +420,7 @@ function _gen_jlconvert_immutable(typeinfo::JldTypeInfo, @nospecialize(T))
                 push!(args, quote
                     ref = unsafe_load(convert(Ptr{HDF5ReferenceObj}, ptr)+$h5offset)
                     if ref == HDF5.HDF5ReferenceObj_NULL
-                        warn("""A pointerfree tuple field was undefined.
+                        @warn("""A pointerfree tuple field was undefined.
                                 This is not supported in Julia 0.4 and the corresponding tuple will be uninitialized.""")
                     else
                         ccall(:jl_set_nth_field, Nothing, (Any, Csize_t, Any), out, $(i-1), convert($(T.types[i]), read_ref(file, ref)))
@@ -454,7 +458,7 @@ function _gen_jlconvert_immutable!(typeinfo::JldTypeInfo, @nospecialize(T))
                 push!(args, quote
                     ref = unsafe_load(convert(Ptr{HDF5ReferenceObj}, ptr)+$h5offset)
                     if ref == HDF5.HDF5ReferenceObj_NULL
-                        warn("""A pointerfree tuple field was undefined.
+                        @warn("""A pointerfree tuple field was undefined.
                                 This is not supported in Julia 0.4 and the corresponding tuple will be uninitialized.""")
                     else
                         unsafe_store!(convert(Ptr{$(T.types[i])}, out)+$jloffset, read_ref(file, ref))
@@ -695,7 +699,7 @@ function jldatatype(parent::JldFile, dtype::HDF5Datatype)
         typename = get(JL_TYPENAME_TRANSLATE, typename, typename)
         T = julia_type(typename)
         if T == UnsupportedType
-            warn("type $typename not present in workspace; reconstructing")
+            @warn("type $typename not present in workspace; reconstructing")
             T = reconstruct_type(parent, dtype, typename)
         end
 
@@ -707,7 +711,7 @@ function jldatatype(parent::JldFile, dtype::HDF5Datatype)
             if class_id == HDF5.H5T_COMPOUND
                 for i = 0:HDF5.h5t_get_nmembers(dtype.id)-1
                     member_name = HDF5.h5t_get_member_name(dtype.id, i)
-                    idx = rsearchindex(member_name, "_")
+                    idx = findlast("_", member_name).start
                     if idx != sizeof(member_name)
                         member_dtype = HDF5.t_open(parent.plain, string(pathtypes, '/', lpad(member_name[idx+1:end], 8, '0')))
                         jldatatype(parent, member_dtype)
@@ -747,11 +751,11 @@ function reconstruct_type(parent::JldFile, dtype::HDF5Datatype, savedname::Abstr
     else
         # Figure out field names and types
         nfields = HDF5.h5t_get_nmembers(dtype.id)
-        fieldnames = Vector{Symbol}(nfields)
-        fieldtypes = Vector{Type}(nfields)
+        fieldnames = Vector{Symbol}(undef, nfields)
+        fieldtypes = Vector{Type}(undef, nfields)
         for i = 1:nfields
             membername = HDF5.h5t_get_member_name(dtype.id, i-1)
-            idx = rsearchindex(membername, "_")
+            idx = findlast("_", membername).start
             fieldname = fieldnames[i] = Symbol(membername[1:idx-1])
 
             if idx != sizeof(membername)
@@ -800,4 +804,18 @@ function typeindex(parent::JldFile, addr::HDF5.Haddr)
         end
         i += 1
     end
+end
+
+function startswith(array::Vector{UInt8}, sample::Vector{UInt8})
+    if length(array) < length(sample)
+        return false
+    end
+
+    for i in 1:length(sample)
+        if array[i] != sample[i]
+            return false
+        end
+    end
+
+    return true
 end

@@ -3,6 +3,8 @@ __precompile__()
 module JLD
 using HDF5, FileIO
 
+using Compat
+
 using Base.StackTraces
 
 import HDF5: close, dump, exists, file, getindex, setindex!, g_create, g_open, o_delete, name, names, read, write,
@@ -28,8 +30,8 @@ const name_type_attr = "julia type"
 const BitsKindOrString = Union{HDF5BitsKind, String}
 
 function julia_type(s::AbstractString)
-    s = replace(s, r"ASCIIString|UTF8String|ByteString", "String")
-    s = replace(s, "Base.UTF16String", "LegacyStrings.UTF16String")
+    s = replace(s, r"ASCIIString|UTF8String|ByteString" => "String")
+    s = replace(s, "Base.UTF16String" => "LegacyStrings.UTF16String")
     _julia_type(s)
 end
 
@@ -201,8 +203,8 @@ function jldopen(filename::AbstractString, rd::Bool, wr::Bool, cr::Bool, tr::Boo
             finally
                 close(rawfid)
             end
-            if startswith(magic, Vector{UInt8}(undef, magic_base))
-                version = convert(VersionNumber, unsafe_string(pointer(magic) + length(magic_base)))
+            if startswith(magic, Vector{UInt8}(magic_base))
+                version = VersionNumber(unsafe_string(pointer(magic) + length(magic_base)))
                 gcuse(magic)
                 if version < v"0.1.0"
                     fj = JLD00.jldopen(filename, rd, wr, cr, tr, ff; mmaparrays=mmaparrays)
@@ -487,7 +489,7 @@ function refarray_eltype(obj::JldDataset)
     typename = a_read(obj.plain, "julia eltype")
     T = julia_type(typename)
     if T == UnsupportedType
-        warn("type $typename not present in workspace; interpreting array as Array{Any}")
+        @warn("type $typename not present in workspace; interpreting array as Array{Any}")
         return Any
     end
     return T
@@ -884,8 +886,8 @@ JLD.writeas(data::StackFrame) =
 const _where_macrocall = Symbol("@where")
 function expand_where_macro(e::Expr)
     e.head = :where
-    shift!(e.args)
-    Compat.macros_have_sourceloc && shift!(e.args)
+    popfirst!(e.args)
+    Compat.macros_have_sourceloc && popfirst!(e.args)
     return true
 end
 
@@ -1000,7 +1002,7 @@ function julia_type(e::Union{Symbol, Expr})
     if is_valid_type_ex(e)
         try # `try` needed to catch undefined symbols
             # `e` should be fully qualified, and thus reachable from Main
-            typ = eval(Main, e)
+            typ = Base.eval(Main, e)
             typ == Type && return Type
             isa(typ, Type) && return typ
         finally
