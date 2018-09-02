@@ -226,7 +226,7 @@ function h5type(parent::JldFile, T::Union{Type{BigInt}, Type{BigFloat}}, commit:
 end
 
 function h5convert!(out::Ptr, file::JldFile, x::BigInt, wsession::JldWriteSession)
-    str = base(62, x)
+    str = string(x, base = 62)
     push!(wsession.persist, str)
     h5convert!(out, file, str, wsession)
 end

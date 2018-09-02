@@ -830,12 +830,13 @@ end
 # Special case for SimpleVector
 # Wrapper for SimpleVector
 struct SimpleVectorWrapper
-    elements::Core.SimpleVector
+    elements::Vector
 end
 
+global call_counter = 1
 # Special case for SimpleVector
 readas(x::SimpleVectorWrapper) = Core.svec(x.elements...)
-writeas(x::Core.SimpleVector) = SimpleVectorWrapper(x)
+writeas(x::Core.SimpleVector) = SimpleVectorWrapper([x...])
 
 # function to convert string(mod::Module) back to mod::Module
 function modname2mod(modname::AbstractString)
