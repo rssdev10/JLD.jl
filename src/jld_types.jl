@@ -513,14 +513,14 @@ function gen_jlconvert(@nospecialize(T))
     typeinfo = JLCONVERT_INFO[T]::JldTypeInfo
     if isa(T, TupleType)
         return _gen_jlconvert_tuple(typeinfo, T)
-    elseif isempty(fieldnames(T))
+    elseif !T.mutable && isempty(fieldnames(T))
         if T.size == 0
             return T.instance
         else
            return :(_jlconvert_bits(T, ptr))
         end
     elseif T.size == 0
-        return :(ccall(:jl_new_struct_uninit, Ref{T}, (Any,), T))
+        return Expr(:new, T)
     elseif T.mutable
         return _gen_jlconvert_type(typeinfo, T)
     else
